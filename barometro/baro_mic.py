@@ -6,7 +6,9 @@ frequencies below ~100 Hz can be present in its data; voice intelligibility live
 This pipeline extracts whatever acoustic energy survives in the usable band, suppresses the sensor's
 noise floor, and renders the result as a 16 kHz WAV.
 
-Input:  CSV with one pressure value per line (hPa or Pa, see --unit), optionally "t,pressure".
+Input:  CSV with one pressure value per line (hPa or Pa, see --unit), optionally "t,pressure",
+        or /user/baro.bin as recorded by the Barometro app on the watch (watch/baro.c): its sample
+        rate is measured from the recording, so --fs is optional then.
 Output: 16 kHz mono 16-bit WAV.
 
     python3 baro_mic.py samples.csv --fs 200 -o out.wav
@@ -43,6 +45,23 @@ def load_csv(path, unit):
                 continue  # header
     x = np.asarray(vals, dtype=np.float64)
     return x * 100.0 if unit == "hPa" else x
+
+
+def load_bin(path):
+    """/user/baro.bin of the Barometro app -> (pressure in Pa, measured sample rate, header info)"""
+    import struct
+    b = open(path, "rb").read()
+    magic, ver, count, t0, t1, mode = struct.unpack_from("<6I", b, 0)
+    if magic != 0x4F524142 or ver != 1:
+        raise SystemExit("not a baro.bin file")
+    first = [b[24 + 24 * i: 48 + 24 * i] for i in range(8)]
+    words = struct.unpack_from("<%dI" % count, b, 216)
+    vals = np.array(struct.unpack("<%df" % count, struct.pack("<%dI" % count, *words)), dtype=np.float64)
+    fs = count * 1000.0 / max(1, (t1 - t0))
+    unit_hpa = 300 < np.median(vals) < 1200
+    info = dict(count=count, seconds=(t1 - t0) / 1000.0, mode=mode, fs=fs, unit="hPa" if unit_hpa else "?",
+                first=[f.hex() for f in first])
+    return (vals * 100.0 if unit_hpa else vals), fs, info
 
 
 def bandpass(x, fs, lo, hi):
@@ -92,14 +111,23 @@ def write_wav(path, audio, rate=OUT_RATE):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("csv")
-    ap.add_argument("--fs", type=float, required=True, help="sample rate of the pressure data (Hz)")
+    ap.add_argument("--fs", type=float, help="sample rate of the pressure data (Hz); measured from a .bin")
     ap.add_argument("--unit", choices=["hPa", "Pa"], default="hPa")
     ap.add_argument("--hp", type=float, default=15.0, help="high-pass cut-off (Hz)")
     ap.add_argument("--lp", type=float, default=None, help="low-pass cut-off (Hz), default 0.45*fs")
     ap.add_argument("--no-gate", action="store_true", help="skip spectral noise gating")
     ap.add_argument("-o", "--out", default="baro_mic.wav")
     a = ap.parse_args(argv)
-    pa = load_csv(a.csv, a.unit)
+    if a.csv.endswith(".bin"):
+        pa, fs, info = load_bin(a.csv)
+        print("baro.bin: %(count)d amostras em %(seconds).1f s (%(fs).1f Hz), modo %(mode)d, unidade %(unit)s" % info)
+        print("primeiros registros:", *info["first"][:3], sep="\n  ")
+        a.fs = a.fs or fs
+        np.savetxt(a.out.rsplit(".", 1)[0] + ".csv", pa / 100.0, fmt="%.6f")
+    else:
+        if not a.fs:
+            sys.exit("--fs is required for a CSV")
+        pa = load_csv(a.csv, a.unit)
     if len(pa) < a.fs:
         sys.exit("need at least one second of samples")
     y = process(pa, a.fs, a.hp, a.lp, not a.no_gate)
