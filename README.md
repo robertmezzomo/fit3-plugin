@@ -35,8 +35,9 @@ O limite é de 100 bytes por mensagem, como no relógio original.
 | Telas do teclado (letras, acentos, símbolos, "Enviado") | simulador |
 | Texto entregue ao relógio para envio, com acentos em UTF-8 (`Ola tudo bemçã`, 16 bytes) | simulador |
 | Teclado original do toolkit respondendo SMS e Signal | relógio (relatado pelo toolkit, 2026-11-02) |
-| **Esta versão modificada num relógio real** | **ainda não testado** |
-| **Instalação pelo Fit3-App** (em vez do PC com Linux) | **ainda não testado** |
+| Esta versão modificada num relógio real: teclado funcionando | relógio (2026-11-15) |
+| Instalação pelo Fit3-App (em vez do PC com Linux) | relógio (2026-11-15) |
+| Quais apps de mensagem aceitam a resposta (WhatsApp etc.) | ainda não registrado |
 
 ### ⚠️ Riscos
 
