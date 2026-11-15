@@ -86,6 +86,10 @@ Pelo Android, com o [Fit3-App](https://github.com/yuriyurin/Fit3-App):
 
 Para desfazer, instale o firmware original pelo mesmo caminho.
 
+## Barômetro como microfone
+
+Experimento: [barometro/](barometro/README.md).
+
 ## Créditos e licença
 
 - Teclado e ferramentas: [fit3-toolkit](https://github.com/Musicalista/fit3-toolkit-fork), Apache-2.0.
