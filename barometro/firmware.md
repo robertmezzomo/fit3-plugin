@@ -129,3 +129,21 @@ explica os zeros: pedir taxa alta em baixo consumo é inválido e o chip para. `
 byte do modo (2→3) **junto** com o código de ODR (via `ODR_CODE`), refazendo os CRCs. Os dois são
 mudanças de 1 byte, em modos válidos do chip, só em tempo de execução (não no boot), reversíveis.
 `patch_odr.py` continua existindo para o experimento só de ODR.
+
+## Resultado do modo baixo ruído sozinho (2026-11-16)
+
+Só o patch de modo (baixo ruído, taxa de fábrica): o Gravador mostrou **114 leituras/s** ao vivo e salvou
+478 amostras a 95 Hz; a página receptora leu 519 amostras a 102 Hz. Ou seja, o modo baixo ruído **não
+aumenta a taxa entregue** — segue em ~100 Hz. Com taxa alta (código 5/6/7), em baixo ruído ou baixo
+consumo, a entrega é zero.
+
+Conclusão final da linha do acelerômetro-microfone: a taxa entregue ao processador principal está presa
+em ~100 Hz por como o processador de sensores lê o chip (uma amostra por interrupção, agenda feita para
+~100 Hz), não pelo modo nem pelo ODR. 100 Hz capta só até ~50 Hz, muito abaixo da voz. Único caminho
+restante, não perseguido por risco/custo: reescrever a leitura do processador de sensores para drenar a
+FIFO do chip em rajadas e refazer o envio ao processador principal — injeção de código novo nesse
+firmware, sem code cave, sem emulador, com risco de deixar os sensores inoperantes.
+
+O que funciona de ponta a ponta, validado com dado real: gravar no relógio (app Gravador, formato F3R1)
+→ baixar pelo Fit3 App → ler e analisar na página receptora (onda, espectrograma, métricas). Só falta um
+sinal de voz, que este hardware não entrega.
