@@ -1,0 +1,77 @@
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index a9d2704..a8ab0cd 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -9,11 +9,11 @@ android {
+     compileSdk = 35
+ 
+     defaultConfig {
+-        applicationId = "io.github.yuriyurin.fit3companion"
++        applicationId = "io.github.yuriyurin.fit3companion.fit3plugin"     // fit3-plugin build: installs beside the original app
+         minSdk = 29
+         targetSdk = 35
+         versionCode = 83
+-        versionName = "0.7.0b12"
++        versionName = "0.7.0b12-fit3plugin"
+         testInstrumentationRunner = providers.gradleProperty("fit3TestRunner").getOrElse("io.github.yuriyurin.fit3companion.HealthStorageSmoke")
+     }
+ 
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index ecb48db..2ec00c9 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -27,7 +27,7 @@
+         android:allowBackup="false"
+         android:icon="@mipmap/ic_launcher"
+         android:roundIcon="@mipmap/ic_launcher_round"
+-        android:label="Fit3 App"
++        android:label="Fit3 App (fit3-plugin)"
+         android:supportsRtl="true"
+         android:theme="@android:style/Theme.Material.Light.NoActionBar">
+         <activity
+diff --git a/app/src/main/java/io/github/yuriyurin/fit3companion/protocol/Fit3FileSession.kt b/app/src/main/java/io/github/yuriyurin/fit3companion/protocol/Fit3FileSession.kt
+index 00b9386..a50ef2d 100644
+--- a/app/src/main/java/io/github/yuriyurin/fit3companion/protocol/Fit3FileSession.kt
++++ b/app/src/main/java/io/github/yuriyurin/fit3companion/protocol/Fit3FileSession.kt
+@@ -19,6 +19,7 @@ internal class Fit3FileSession {
+         }
+         if (status !in 0..1) return null
+         waiting = false
+-        return status == 1
++        // fit3-plugin: a watch running a fit3-toolkit build keeps its serial service always open and refuses BT_OPEN; try the RFCOMM connection anyway.
++        return true
+     }
+ }
+diff --git a/app/src/main/java/io/github/yuriyurin/fit3companion/protocol/Fit3FirmwareSession.kt b/app/src/main/java/io/github/yuriyurin/fit3companion/protocol/Fit3FirmwareSession.kt
+index 5087e82..80863ea 100644
+--- a/app/src/main/java/io/github/yuriyurin/fit3companion/protocol/Fit3FirmwareSession.kt
++++ b/app/src/main/java/io/github/yuriyurin/fit3companion/protocol/Fit3FirmwareSession.kt
+@@ -36,6 +36,12 @@ internal class Fit3FirmwareSession {
+         // Ignore a late response for music/watchfaces; never use it as OTA permission.
+         if (feature != null && feature != 21) return null
+         if (status !in listOf(0, 1)) return null
++        // fit3-plugin: a watch running a fit3-toolkit build keeps its serial service (SPP) always open, and answers BT_OPEN (request 2) with 0.
++        // Go on to the RFCOMM connection anyway: if the service is really closed, that connection fails and the flash stops there, before any byte is written.
++        if (status == 0 && stage == Stage.OPEN) {
++            stage = Stage.READY
++            return Action(ready = true)
++        }
+         if (status == 0) {
+             stage = Stage.FAILED
+             return Action(error = "Band rejected OTA request $expected (reason ${reason ?: -1})")
+diff --git a/app/src/test/java/io/github/yuriyurin/fit3companion/protocol/Fit3FirmwareSessionTest.kt b/app/src/test/java/io/github/yuriyurin/fit3companion/protocol/Fit3FirmwareSessionTest.kt
+index 517d693..a60d987 100644
+--- a/app/src/test/java/io/github/yuriyurin/fit3companion/protocol/Fit3FirmwareSessionTest.kt
++++ b/app/src/test/java/io/github/yuriyurin/fit3companion/protocol/Fit3FirmwareSessionTest.kt
+@@ -21,6 +21,11 @@ class Fit3FirmwareSessionTest {
+         assertNotNull(s.receive(reply(1, 0, 21))!!.error)
+         assertNull(s.receive(reply(2, 1)))
+     }
++    @Test fun refusedBtOpenStillTriesTheSerialService() {
++        val s = Fit3FirmwareSession(); s.begin("R390_Fit3App.bin", 1)
++        assertArrayEquals(byteArrayOf(2), s.receive(reply(1, 1, 21))!!.request)
++        assertTrue(s.receive(reply(2, 0))!!.ready)
++    }
+     @Test fun malformedResponsesDoNotAdvance() {
+         val s = Fit3FirmwareSession(); s.begin("R390_Fit3App.bin", 1)
+         assertNull(s.receive(byteArrayOf(65, 1)))

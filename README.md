@@ -86,6 +86,10 @@ Pelo Android, com o [Fit3-App](https://github.com/yuriyurin/Fit3-App):
 
 Para desfazer, instale o firmware original pelo mesmo caminho.
 
+## Fit3-App para relógio modificado
+
+Instalar firmware de novo depois do primeiro: [fit3app/](fit3app/README.md) (GPL-3.0).
+
 ## Barômetro como microfone
 
 Experimento: [barometro/](barometro/README.md).
