@@ -89,3 +89,27 @@ Ou seja, entre o código 8 (estoque, ~100 Hz entregues) e o código 5 (zero) a e
 passo é uma busca binária: tentar o código **7** (um degrau acima do estoque). `patch_odr.py` aceita
 `ODR_CODE` (5/6/7/8) para gerar cada variante. Se o 7 também der zero, o caminho do processador de
 sensores está limitado a ~100 Hz e o acelerômetro-microfone não alcança a banda da voz por aqui.
+
+## Conclusão: o acelerômetro não passa de ~100 Hz (2026-11-16)
+
+Medido no relógio, com o app Gravador e o Acelerometro:
+
+| Código ODR escrito no chip | Taxa realmente entregue |
+|---|---|
+| 8 (de fábrica) | ~100 Hz |
+| 7 | 0 |
+| 5 (nominal 1600 Hz) | 0 |
+
+Acima do código 8 o sensor para de entregar dados (0 leituras/s ao vivo, gravação de 0 amostras). O
+relógio não trava e volta ao normal reinstalando o original. A causa provável é que o caminho de
+leitura do processador de sensores (uma amostra por interrupção de dado-pronto, sem FIFO) e/ou a
+sequência da ROM do chip só suportam até o código 8 no modo em que o firmware inicializa o ICM-42670.
+
+**Consequência:** 100 Hz capta só até ~50 Hz, abaixo da voz. O acelerômetro como microfone **não alcança
+a banda da fala neste hardware** pelos caminhos acessíveis (patch de ODR). A única via restante seria
+reescrever a leitura do processador de sensores para usar a FIFO do chip e refazer o agendamento e o
+envio ao processador principal — muito trabalho, sem emulador desse processador e com risco real, sem
+garantia de funcionar. Linha encerrada aqui.
+
+O que fica e funciona: o teclado QWERTY (testado no relógio), o receptor "Fit3 Voz", o app Gravador e a
+engenharia reversa documentada. O barômetro tem o mesmo teto de ~100 Hz.
