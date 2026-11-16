@@ -78,3 +78,14 @@ ligar o sensor, nunca no boot. Mede-se o resultado com o app Acelerometro.
 **Dúvida que só o relógio resolve:** o código 5 pode não dar exatamente 1600 Hz (a função que escreve no
 chip está na ROM do processador, fora da imagem), e o lote de 50 pode continuar entregando ~100. O teste
 diz qual dos dois.
+
+## Resultado da Etapa 1 no relógio (2026-11-16)
+
+Com o código 5 (nominal 1600 Hz) o acelerômetro **parou de entregar dados acima de 50 Hz**: no app
+Acelerometro, 25→20, 50→50, e 100/200/400/800/1600/… → **0**. O relógio não travou (25 e 50 seguem
+funcionando, o chip responde), então o patch é seguro e reversível, mas forçar o código 5 não serve.
+
+Ou seja, entre o código 8 (estoque, ~100 Hz entregues) e o código 5 (zero) a entrega morre. Próximo
+passo é uma busca binária: tentar o código **7** (um degrau acima do estoque). `patch_odr.py` aceita
+`ODR_CODE` (5/6/7/8) para gerar cada variante. Se o 7 também der zero, o caminho do processador de
+sensores está limitado a ~100 Hz e o acelerômetro-microfone não alcança a banda da voz por aqui.

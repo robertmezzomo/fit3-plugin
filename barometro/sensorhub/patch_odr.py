@@ -19,7 +19,8 @@ import sys, hashlib
 HUB = "/user/ota/sensorhub/sensor_hub.bin"
 OFF = 0x2603061a - 0x26000000      # image base 0x26000000
 OLD = b"\x08\x21"                  # movhs r1,#8
-NEW = b"\x05\x21"                  # movs  r1,#5  (ICM-42670 ODR code 5 = 1600 Hz)
+ODR_CODE = int(__import__("os").environ.get("ODR_CODE", "5"))   # 5=1600 6=800 7=400 8=100(estoque)
+NEW = bytes([ODR_CODE, 0x21])    # movs r1,#<code>
 
 def main(argv):
     if len(argv) != 3:
@@ -39,3 +40,4 @@ def main(argv):
 
 if __name__ == "__main__":
     main(sys.argv[1:])
+# Uso com código alternativo:  ODR_CODE=7 python3 patch_odr.py <toolkit>/src/firmware in.bin out.bin
