@@ -20,7 +20,8 @@ fit3app/build.sh Fit3App-fit3plugin.apk
 ```
 
 Os testes do protocolo (`Fit3FirmwareSessionTest`, `BandFileTransportTest`, 16 no total) passam.
-**Ainda não testado num relógio.**
+**Num relógio real (2026-11-16):** instalou o firmware `R390XXU0AZA3_teclado_sensores.bin` num relógio
+que já rodava um firmware do fit3-toolkit e recusava o BT_OPEN.
 
 ## Licença
 
