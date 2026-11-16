@@ -113,3 +113,19 @@ garantia de funcionar. Linha encerrada aqui.
 
 O que fica e funciona: o teclado QWERTY (testado no relógio), o receptor "Fit3 Voz", o app Gravador e a
 engenharia reversa documentada. O barômetro tem o mesmo teto de ~100 Hz.
+
+## Nova hipótese: modo baixo ruído (2026-11-16)
+
+O init do ICM-42670 (`icm42670` resume, `0x260527ac`) escreve o registrador `0x4e` com os bits de modo
+em **2 = baixo consumo**:
+
+```
+0x260528b4  bic r3, r3, #3    ; limpa bits [1:0]
+0x260528b8  orr r3, r3, #2    ; modo 2 = baixo consumo
+```
+
+No ICM-42670 o modo 2 (baixo consumo) limita a taxa; o modo 3 (baixo ruído) permite até 1600 Hz. Isso
+explica os zeros: pedir taxa alta em baixo consumo é inválido e o chip para. `patch_sensor.py` troca o
+byte do modo (2→3) **junto** com o código de ODR (via `ODR_CODE`), refazendo os CRCs. Os dois são
+mudanças de 1 byte, em modos válidos do chip, só em tempo de execução (não no boot), reversíveis.
+`patch_odr.py` continua existindo para o experimento só de ODR.
