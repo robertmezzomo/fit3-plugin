@@ -2,7 +2,7 @@
 """test_baro.py: the Barometro app (baro.c) on the real firmware in the fit3-toolkit emulator, with simulated barometer samples.
 
 Run from the patched fit3-toolkit checkout (barometro/watch/build.sh prints the commands):
-    F3_HOSTIMAGE=local/re/main-baro.bin local/venv/bin/python -I <this file>
+    F3_HOSTIMAGE=local/re/main-sensores.bin local/venv/bin/python -I <this file>
 
 It plays the window manager (as test_host.py does), opens the app, calls the sensor callback the app registered with records like the ones the sensor hub
 sends (byte 0 = sensor 3, +8 a float pressure in hPa, +12 a float temperature), and checks the screen, the recording and the cleanup. It cannot show
@@ -14,7 +14,7 @@ from rig import Rig as _Rig, A
 REC = 0x200fb4e4 + 0x10 * 0x30
 
 class Rig(_Rig):                                                                  # as in test_host.py (which runs its own tests when imported)
-    def __init__(self): super().__init__(os.environ.get("F3_HOSTIMAGE", "local/re/main-baro.bin"))
+    def __init__(self): super().__init__(os.environ.get("F3_HOSTIMAGE", "local/re/main-sensores.bin"))
     def create(self):
         scr = super().create(); self.rows = self.children(self.children(scr)[1]); return scr
     def manager_open(self, arg):
@@ -30,7 +30,7 @@ def main():
     e.hook(0x2c0f04e4, lambda em: calls.append(("mode", em.arg(0), em.arg(1))) or 0)
     r.create(); names = [r.alltext(x) for x in r.rows]
     ok("the hub lists the app", ["Barometro"] in names, names)
-    r.click(r.rows[names.index(["Barometro"])]); scr = r.manager_open(0); st = e.u32(r.win + 16)
+    idx = names.index(["Barometro"]); r.click(r.rows[idx]); scr = r.manager_open(idx); st = e.u32(r.win + 16)
     ok("the app opened (state set)", st != 0, hex(st))
     lis = [c for c in calls if c[0] == "listen"]
     ok("it listens to sensor 3 and asks for mode 1 (100 Hz)", len(lis) == 1 and lis[0][1] == 3 and ("mode", 3, 1) in calls, calls)

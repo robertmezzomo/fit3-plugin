@@ -1,0 +1,416 @@
+diff --git a/src/assets/mkicon.py b/src/assets/mkicon.py
+index 94b2ce2..5595ec9 100644
+--- a/src/assets/mkicon.py
++++ b/src/assets/mkicon.py
+@@ -19,7 +19,9 @@ KINDS = {"tennis": ((46, 128, 222), (30, 93, 182)),     # court blue
+          "hub": ((64, 196, 150), (28, 140, 108)),       # green
+          "counter": ((250, 168, 44), (226, 118, 22)),   # orange
+          "dice": ((154, 104, 232), (104, 60, 190)),     # purple
+-         "mars": ((214, 96, 52), (150, 52, 30))}        # rust red
++         "mars": ((214, 96, 52), (150, 52, 30)),        # rust red
++         "baro": ((70, 150, 240), (36, 84, 190)),       # blue
++         "accel": ((60, 200, 160), (24, 140, 110))}     # teal
+ WHITE = (255, 255, 255)
+ 
+ 
+@@ -64,7 +66,21 @@ def _glyph_mars(x, y, rgb):
+     return np.where(patch[..., None], np.array((86, 190, 98), float), rgb)
+ 
+ 
+-GLYPHS = {"mars": _glyph_mars, "tennis": _glyph_tennis, "hub": _glyph_hub, "counter": _glyph_counter, "dice": _glyph_dice}
++def _glyph_baro(x, y, rgb):
++    wave = np.abs(y - (32 + 10 * np.sin((x - 10) / 44 * 2 * np.pi * 1.5))) <= 2.6        # a white sound wave
++    m = wave & (x >= 10) & (x <= 54)
++    return np.where(m[..., None], np.array(WHITE, float), rgb)
++
++
++def _glyph_accel(x, y, rgb):
++    m = np.zeros(x.shape, bool)                                                  # three white axes (x, y, z)
++    m |= (np.abs(y - 40) <= 2.4) & (x >= 20) & (x <= 50)
++    m |= (np.abs(x - 22) <= 2.4) & (y >= 12) & (y <= 42)
++    m |= (np.abs((x - 22) + (y - 40)) <= 3.0) & (x >= 10) & (x <= 22)
++    return np.where(m[..., None], np.array(WHITE, float), rgb)
++
++
++GLYPHS = {"accel": _glyph_accel, "baro": _glyph_baro, "mars": _glyph_mars, "tennis": _glyph_tennis, "hub": _glyph_hub, "counter": _glyph_counter, "dice": _glyph_dice}
+ 
+ 
+ def draw(kind="tennis", size=SIZE):
+diff --git a/src/watch/apps/accel.c b/src/watch/apps/accel.c
+new file mode 100644
+index 0000000..0992f3f
+--- /dev/null
++++ b/src/watch/apps/accel.c
+@@ -0,0 +1,180 @@
++/* SPDX-License-Identifier: Apache-2.0 */
++/* apps/accel.c: which accelerometer this Fit3 has, how fast it can be read and how fine its steps are (fit3-plugin/barometro, "acelerometro").
++ *
++ * Listens to sensor 0 (the accelerometer, as in the factory test) through the firmware's sensor service, then asks the sensor hub for rising rates
++ * (sensor_rate, message 6) and measures how many samples per second really arrive. The two possible chips have different rate ladders:
++ *   ICM-42670  12.5 25 50 100 200 400 800 1600
++ *   LSM6DSO    12.5 26 52 104 208 416 833 1666 3333 6666
++ * so a measured 400-ish or 416-ish (or anything above 1600) names the chip. It also shows the smallest step between two samples and the noise at rest,
++ * which tell the resolution and the full-scale range in use, and saves the sweep and 340 raw samples to /user/accel.bin for the phone.
++ *
++ * Firmware functions (R390XXU0AZA3, fit3-plugin/barometro/firmware.md): 0x2c0f036c sensor_listen, 0x2c0f03f0 sensor_unlisten, 0x2c0f04a0 sensor_rate.
++ * The callback runs in the sensor-service thread: it only writes into a ring. Nothing here is verified on a watch yet. */
++#include "ui.h"
++#include "icons.h"
++
++#define ACC_SENSOR 0
++#define ACC_MAGIC 0x31434341u                                    /* "ACC1" */
++#define ACC_RING 512
++#define ACC_NRATES 9
++#define ACC_CAP 340
++#define ACC_PATH "/user/accel.bin"
++#define acc_listen(id, cb)   F(0x2c0f036c, u32, (u32, void (*)(const u8 *)))(id, cb)
++#define acc_unlisten(id, cb) F(0x2c0f03f0, u32, (u32, void (*)(const u8 *)))(id, cb)
++#define acc_rate(id, hz)     F(0x2c0f04a0, u32, (u32, u32))(id, hz)
++
++static const u16 ACC_RATES[ACC_NRATES] = { 25, 50, 100, 200, 400, 800, 1600, 3200, 6400 };
++
++typedef struct {                                                 /* /user/accel.bin */
++    u32 magic, version, chip, ncap, measured[ACC_NRATES], minstep[3], noise[3];
++    u32 first[4][10];                                            /* the first 4 callbacks, 40 bytes each (rec[0..39]) */
++    u32 cap[ACC_CAP][3];                                         /* x, y, z words of ACC_CAP records, at the highest rate reached */
++} AccFile;
++
++typedef struct {
++    u32 magic;
++    volatile u32 head;
++    u32 rx[ACC_RING], ry[ACC_RING], rz[ACC_RING];
++    u32 first[4][10]; volatile u8 nfirst;
++    u32 tail, rate_n, rate_t, rate;
++    u8 sweeping, step, done, isfloat, counting; u32 step_t, step_n0, step_t0;
++    u32 measured[ACC_NRATES];
++    u32 minstep[3]; i32 prev[3]; u8 have_prev; i32 mean[3]; u32 msq[3], nsq;           /* msq: running mean of the squared deviation (noise power) */
++    lv_obj_t *l_rate, *l_raw, *l_res, *l_chip, *l_sweep, *b_go;
++    lv_timer_t *timer;
++    char t_rate[TXT_MAX], t_raw[TXT_MAX], t_res[TXT_MAX], t_chip[TXT_MAX], t_sweep[160];
++} Acc;
++
++static Acc *acc_state(void) {
++    lv_obj_t *scr = *(lv_obj_t **)(0x200fb4e4u + 0x10u * 0x30u + 0x10u);
++    if (!scr) return 0;
++    void *w = *(void **)((u8 *)scr + 0x10); if (!w) return 0;
++    Acc *s = *(Acc **)((u8 *)w + 16);
++    return s && s->magic == ACC_MAGIC ? s : 0;
++}
++static void acc_cb(const u8 *rec) {
++    if (rec[0] != ACC_SENSOR) return;
++    Acc *s = acc_state(); if (!s) return;
++    u32 h = s->head, i = h % ACC_RING;
++    s->rx[i] = *(const u32 *)(rec + 8); s->ry[i] = *(const u32 *)(rec + 12); s->rz[i] = *(const u32 *)(rec + 16);
++    if (s->nfirst < 4) { mcopy(s->first[s->nfirst], rec, 40); s->nfirst++; }
++    s->head = h + 1;
++}
++
++/* a float (as bits) times 1000, without floating point; for an int word, the word itself */
++static i32 acc_val(Acc *s, u32 b) {
++    if (!s->isfloat) return (i32)b;
++    u32 e = (b >> 23) & 0xff; if (e == 0 || e == 0xff) return 0;
++    u32 m = (b & 0x7fffff) | 0x800000; unsigned long long p = (unsigned long long)m * 1000u;
++    u32 lo = (u32)p, hi = (u32)(p >> 32); int sh = (int)e - 150;
++    if (sh > 0) { if (sh > 7 || hi) return 0x7fffffff; lo <<= sh; } else for (int k = 0; k < -sh; k++) { lo = (lo >> 1) | (hi << 31); hi >>= 1; }
++    if (hi || lo > 0x7fffffff) lo = 0x7fffffff;
++    return (b >> 31) ? -(i32)lo : (i32)lo;
++}
++static u32 acc_isqrt(u32 v) { u32 r = 0, b = 1u << 30; while (b > v) b >>= 2; while (b) { if (v >= r + b) { v -= r + b; r = (r >> 1) + b; } else r >>= 1; b >>= 2; } return r; }
++static char *acc_puthex(char *b, u32 v) { for (int i = 28; i >= 0; i -= 4) *b++ = "0123456789abcdef"[(v >> i) & 15]; *b = 0; return b; }
++static int acc_near(u32 m, u32 t) { return m * 1000 >= t * 980 && m * 1000 <= t * 1020; }      /* within 2 %: 400 and 416 are 4 % apart */
++/* 0 unknown, 1 ICM-42670, 2 LSM6DSO */
++static u32 acc_chip(Acc *s) {
++    u32 icm = 0, lsm = 0;
++    for (int i = 0; i < ACC_NRATES; i++) {
++        u32 m = s->measured[i]; if (m < 90) continue;
++        if (acc_near(m, 100) || acc_near(m, 200) || acc_near(m, 400) || acc_near(m, 800) || acc_near(m, 1600)) icm++;
++        if (acc_near(m, 104) || acc_near(m, 208) || acc_near(m, 416) || acc_near(m, 833) || acc_near(m, 1666) || acc_near(m, 3333) || acc_near(m, 6666)) lsm++;
++        if (m > 1700) lsm += 2;                                  /* faster than the ICM-42670 can go */
++    }
++    return lsm > icm ? 2 : icm > lsm ? 1 : 0;
++}
++static void acc_render_chip(Acc *s) {
++    u32 c = acc_chip(s);
++    set_txt(s->l_chip, s->t_chip, c == 1 ? "Chip: ICM-42670" : c == 2 ? "Chip: LSM6DSO" : s->done ? "Chip: nao identificado" : "Chip: ?");
++}
++static void acc_render_sweep(Acc *s) {
++    char *p = s->t_sweep; *p = 0;
++    for (int i = 0; i < ACC_NRATES; i++) {
++        if (i > s->step && !s->done) break;
++        p = putn(p, ACC_RATES[i], 1); p = put(p, ">"); p = putn(p, s->measured[i], 1); p = put(p, (i % 3 == 2) ? "\n" : "  ");
++    }
++    lv_label_set_text(s->l_sweep, s->t_sweep);
++}
++static void acc_save(Acc *s) {
++    AccFile *f = (AccFile *)app_malloc(sizeof(AccFile)); if (!f) return;
++    fill8(f, 0, sizeof(AccFile));
++    f->magic = ACC_MAGIC; f->version = 1; f->chip = acc_chip(s);
++    for (int i = 0; i < ACC_NRATES; i++) f->measured[i] = s->measured[i];
++    for (int a = 0; a < 3; a++) { f->minstep[a] = s->minstep[a]; f->noise[a] = acc_isqrt(s->msq[a]); }
++    mcopy(f->first, s->first, sizeof f->first);
++    u32 h = s->head, n = h < ACC_CAP ? h : ACC_CAP; f->ncap = n;
++    for (u32 k = 0; k < n; k++) { u32 i = (h - n + k) % ACC_RING; f->cap[k][0] = s->rx[i]; f->cap[k][1] = s->ry[i]; f->cap[k][2] = s->rz[i]; }
++    i32 fd = f_open(ACC_PATH, "w");
++    if (fd >= 0) { f_write(fd, f, sizeof(AccFile)); f_close(fd); }
++    app_free(f);
++}
++
++static void acc_click(lv_event_t *e) {
++    Acc *s = (Acc *)lv_event_get_user_data(e);
++    if (lv_event_get_code(e) != EV_CLICKED || s->sweeping) return;
++    motor_once(1, 1);
++    fill8(s->measured, 0, sizeof s->measured); s->done = 0;
++    s->sweeping = 1; s->step = 0; s->counting = 0; acc_rate(ACC_SENSOR, ACC_RATES[0]); s->step_t = lv_tick_get();
++    acc_render_sweep(s); acc_render_chip(s);
++}
++static void acc_tick(lv_timer_t *t) {
++    Acc *s = (Acc *)timer_user_data(t); u32 now = lv_tick_get(), h = s->head;
++    if (h && s->tail == 0 && !s->have_prev) {                    /* the first sample decides how the words are read */
++        u32 b = s->rx[0], e = (b >> 23) & 0xff; s->isfloat = (e >= 100 && e <= 140);
++    }
++    if (h - s->tail > ACC_RING) { s->tail = h - ACC_RING; s->have_prev = 0; }
++    for (; s->tail != h; s->tail++) {
++        u32 i = s->tail % ACC_RING; i32 v[3] = { acc_val(s, s->rx[i]), acc_val(s, s->ry[i]), acc_val(s, s->rz[i]) };
++        for (int a = 0; a < 3; a++) {
++            if (s->have_prev) { i32 d = v[a] - s->prev[a]; if (d < 0) d = -d; if (d && (!s->minstep[a] || (u32)d < s->minstep[a])) s->minstep[a] = (u32)d; }
++            if (!s->mean[a]) s->mean[a] = v[a];
++            s->mean[a] += (v[a] - s->mean[a]) / 64;
++            i32 dv = v[a] - s->mean[a]; if (dv > 46000) dv = 46000; if (dv < -46000) dv = -46000;
++            u32 x = (u32)(dv * dv); if (x > s->msq[a]) s->msq[a] += (x - s->msq[a]) >> 6; else s->msq[a] -= (s->msq[a] - x) >> 6;
++            s->prev[a] = v[a];
++        }
++        s->nsq++; s->have_prev = 1; s->rate_n++;
++    }
++    if (now - s->rate_t >= 1000) { s->rate = s->rate_n * 1000 / (now - s->rate_t); s->rate_n = 0; s->rate_t = now; }
++    if (s->sweeping && now - s->step_t >= 3000) {               /* 1 s to settle, then 2 s counted */
++        s->step++;
++        if (s->step >= ACC_NRATES) { s->sweeping = 0; s->done = 1; s->step = ACC_NRATES - 1; acc_rate(ACC_SENSOR, ACC_RATES[0]); acc_save(s); motor_once(4, 1); }
++        else { acc_rate(ACC_SENSOR, ACC_RATES[s->step]); s->step_t = now; s->counting = 0; }
++        acc_render_sweep(s); acc_render_chip(s);
++    }
++    if (s->sweeping && !s->counting && now - s->step_t >= 1000) { s->counting = 1; s->step_n0 = h; s->step_t0 = now; }   /* count from the first tick after the settle second */
++    if (s->sweeping && s->counting && now > s->step_t0) s->measured[s->step] = (h - s->step_n0) * 1000 / (now - s->step_t0);
++    char b[TXT_MAX], *p = putn(b, s->rate, 1); put(p, s->isfloat ? " leituras/s (float)" : " leituras/s (int)"); set_txt(s->l_rate, s->t_rate, b);
++    if (h) { u32 i = (h - 1) % ACC_RING; p = acc_puthex(b, s->rx[i]); p = put(p, " "); p = acc_puthex(p, s->ry[i]); p = put(p, " "); acc_puthex(p, s->rz[i]); set_txt(s->l_raw, s->t_raw, b); }
++    p = put(b, "passo "); p = putn(p, s->minstep[0], 1); p = put(p, "/"); p = putn(p, s->minstep[1], 1); p = put(p, "/"); p = putn(p, s->minstep[2], 1);
++    p = put(p, " ruido "); p = putn(p, acc_isqrt(s->msq[2]), 1); set_txt(s->l_res, s->t_res, b);
++    if (s->sweeping) acc_render_sweep(s);
++}
++static void *acc_create(lv_obj_t *root) {
++    Acc *s = (Acc *)app_malloc(sizeof(Acc)); if (!s) return 0;
++    fill8(s, 0, sizeof(Acc));
++    mk_text(root, 0, 6, 256, FT_SMALL, C_MUTED, ALIGN_CENTER, "Acelerometro");
++    s->l_chip = mk_text(root, 0, 32, 256, FT_BTN, C_WHITE, ALIGN_CENTER, "Chip: ?");
++    s->l_rate = mk_text(root, 0, 72, 256, FT_SMALL, C_WHITE, ALIGN_CENTER, "");
++    s->l_raw = mk_text(root, 0, 100, 256, FT_SMALL, C_MUTED, ALIGN_CENTER, "");
++    s->l_res = mk_text(root, 0, 128, 256, FT_SMALL, C_MUTED, ALIGN_CENTER, "");
++    s->l_sweep = mk_text(root, 4, 160, 248, FT_SMALL, C_WHITE, ALIGN_LEFT, "Toque em Testar com o relogio parado");
++    s->b_go = mk_pill(root, 40, 330, 176, "Testar", 0, acc_click, s);
++    s->rate_t = lv_tick_get();
++    s->magic = ACC_MAGIC;
++    acc_listen(ACC_SENSOR, acc_cb);
++    s->timer = lv_timer_create(acc_tick, 50, s);
++    return s;
++}
++static int acc_back(void *st) { (void)st; return 0; }
++static void acc_destroy(void *st) {
++    Acc *s = (Acc *)st;
++    s->magic = 0;
++    if (s->sweeping) acc_rate(ACC_SENSOR, ACC_RATES[0]);
++    acc_unlisten(ACC_SENSOR, acc_cb);
++    if (s->timer) { lv_timer_del(s->timer); s->timer = 0; }
++    app_free(s);
++}
++APP_EXPORT(accel, "Acelerometro", &ICON_ACCEL, acc_create, acc_back, acc_destroy)
+diff --git a/src/watch/apps/baro.c b/src/watch/apps/baro.c
+new file mode 100644
+index 0000000..3d35360
+--- /dev/null
++++ b/src/watch/apps/baro.c
+@@ -0,0 +1,173 @@
++/* SPDX-License-Identifier: Apache-2.0 */
++/* apps/baro.c: the barometer as a "microphone" (proof of concept, fit3-plugin/barometro).
++ *
++ * Asks the sensor hub for barometer samples through the firmware's own sensor service, shows them live (pressure, samples per second, a waveform of the fast
++ * changes and their level) and records about 10 s to /user/baro.bin, which the phone can download (Fit3-App, file manager) and turn into audio with baro_mic.py.
++ *
++ * Firmware functions (R390XXU0AZA3, found in fit3-plugin/barometro/firmware.md):
++ *   0x2c0f036c  sensor_listen(sensor, cb)    registers cb for a sensor and opens it; the factory test ("[mmi] start baro") uses sensor 3 = barometer
++ *   0x2c0f03f0  sensor_unlisten(sensor, cb)  the reverse
++ *   0x2c0f04e4  sensor_mode(sensor, mode)    sends mode 0/1 to the hub; for the LPS27HHTW mode 1 selects 100 Hz, anything else 1 Hz
++ * cb(rec) runs in the sensor-service thread, not in the UI thread: rec[0] = sensor id, rec + 8 = the 16-byte record of the hub. It only writes into a ring;
++ * the UI timer reads it. cb has no argument for our state, so it finds it the way hub.c does: record of window 0x10 -> its screen -> Win -> st (offset 16).
++ *
++ * Nothing here is verified on a watch yet. */
++#include "ui.h"
++#include "icons.h"
++
++#define BARO_SENSOR 3
++#define BARO_MAGIC 0x4f524142u                                   /* "BARO" */
++#define BARO_RING 256
++#define BARO_CAP 1000                                            /* about 10 s at 100 Hz */
++#define BARO_PATH "/user/baro.bin"
++#define BARO_NBARS 64
++#define sensor_listen(id, cb)   F(0x2c0f036c, u32, (u32, void (*)(const u8 *)))(id, cb)
++#define sensor_unlisten(id, cb) F(0x2c0f03f0, u32, (u32, void (*)(const u8 *)))(id, cb)
++#define sensor_mode(id, m)      F(0x2c0f04e4, u32, (u32, u32))(id, m)
++
++typedef struct {                                                 /* /user/baro.bin: this header, then count words (the first word of each record, as received) */
++    u32 magic, version, count, t_start, t_end, mode;
++    u32 first[8][6];                                             /* the first 8 callbacks, 24 bytes each (rec[0..23]), to identify the record layout */
++} BaroFile;
++
++typedef struct {
++    u32 magic;
++    volatile u32 head;                                           /* written by the callback */
++    u32 ring8[BARO_RING], ringc[BARO_RING];
++    volatile u32 *cap; volatile u32 cap_n; volatile u8 capturing; u8 nfirst, mode, unit;   /* unit: 0 unknown, 1 hPa, 2 Pa */
++    u32 first[8][6];
++    u32 tail, rate_n, rate_t, rate, t_start;
++    i32 ema, hp[BARO_NBARS]; u32 hp_i; i32 last_cpa; u32 level;
++    lv_obj_t *l_p, *l_info, *l_raw, *l_status, *l_mode, *b_rec, *b_mode, *wave, *bar[BARO_NBARS], *lvl;
++    lv_timer_t *timer;
++    char t_p[TXT_MAX], t_info[TXT_MAX], t_raw[TXT_MAX], t_status[TXT_MAX], t_mode[TXT_MAX];
++} Baro;
++
++static Baro *baro_state(void) {
++    lv_obj_t *scr = *(lv_obj_t **)(0x200fb4e4u + 0x10u * 0x30u + 0x10u);
++    if (!scr) return 0;
++    void *w = *(void **)((u8 *)scr + 0x10); if (!w) return 0;
++    Baro *s = *(Baro **)((u8 *)w + 16);
++    return s && s->magic == BARO_MAGIC ? s : 0;
++}
++static void baro_cb(const u8 *rec) {
++    if (rec[0] != BARO_SENSOR) return;
++    Baro *s = baro_state(); if (!s) return;
++    u32 w8 = *(const u32 *)(rec + 8), wc = *(const u32 *)(rec + 12);
++    u32 h = s->head; s->ring8[h % BARO_RING] = w8; s->ringc[h % BARO_RING] = wc; s->head = h + 1;
++    if (s->capturing) {
++        u32 n = s->cap_n;
++        if (n < BARO_CAP && s->cap) { s->cap[n] = w8; s->cap_n = n + 1; }
++        if (s->nfirst < 8) { mcopy(s->first[s->nfirst], rec, 24); s->nfirst++; }
++    }
++}
++
++/* an IEEE-754 single (as bits) times scale, rounded towards zero, without floating point (soft-float would need libgcc) */
++static i32 f2i(u32 b, u32 scale) {
++    u32 e = (b >> 23) & 0xff; if (e == 0 || e == 0xff) return 0;
++    u32 m = (b & 0x7fffff) | 0x800000;
++    unsigned long long p = (unsigned long long)m * scale;
++    u32 lo = (u32)p, hi = (u32)(p >> 32);
++    int sh = (int)e - 150;
++    if (sh > 0) { if (sh > 7 || hi) return 0x7fffffff; lo <<= sh; }
++    else for (int i = 0; i < -sh; i++) { lo = (lo >> 1) | (hi << 31); hi >>= 1; }
++    if (hi || lo > 0x7fffffff) lo = 0x7fffffff;
++    return (b >> 31) ? -(i32)lo : (i32)lo;
++}
++/* the record's first word as a pressure in 0.01 Pa: a float in hPa (~1013) or in Pa (~101325), decided from the first sample */
++static i32 baro_cpa(Baro *s, u32 w) {
++    if (!s->unit) { i32 v = f2i(w, 1); s->unit = (v > 300 && v < 1200) ? 1 : (v > 30000 && v < 120000) ? 2 : 3; }
++    return s->unit == 1 ? f2i(w, 10000) : s->unit == 2 ? f2i(w, 100) : (i32)w;
++}
++static u32 isqrt(u32 v) { u32 r = 0, b = 1u << 30; while (b > v) b >>= 2; while (b) { if (v >= r + b) { v -= r + b; r = (r >> 1) + b; } else r >>= 1; b >>= 2; } return r; }
++static char *puthex(char *b, u32 v) { for (int i = 28; i >= 0; i -= 4) *b++ = "0123456789abcdef"[(v >> i) & 15]; *b = 0; return b; }
++static char *putcpa(char *b, i32 c, int hpa) {                   /* 0.01 Pa as "1013.25 hPa" or "0.42 Pa" */
++    if (c < 0) { *b++ = '-'; c = -c; }
++    if (hpa) { b = putn(b, (u32)c / 10000, 1); b = put(b, "."); b = putn(b, (u32)c / 100 % 100, 2); return put(b, " hPa"); }
++    b = putn(b, (u32)c / 100, 1); b = put(b, "."); b = putn(b, (u32)c % 100, 2); return put(b, " Pa");
++}
++
++static void baro_save(Baro *s) {
++    BaroFile f; fill8(&f, 0, sizeof f);
++    f.magic = BARO_MAGIC; f.version = 1; f.count = s->cap_n; f.t_start = s->t_start; f.t_end = lv_tick_get(); f.mode = s->mode;
++    mcopy(f.first, s->first, sizeof f.first);
++    i32 fd = f_open(BARO_PATH, "w"); if (fd < 0) { set_txt(s->l_status, s->t_status, "Erro ao salvar"); return; }
++    f_write(fd, &f, sizeof f); f_write(fd, (const void *)s->cap, s->cap_n * 4); f_close(fd);
++    char b[TXT_MAX], *p = put(b, "Salvo: "); p = putn(p, s->cap_n, 1); put(p, " amostras");
++    set_txt(s->l_status, s->t_status, b);
++}
++static void baro_render_mode(Baro *s) { set_txt(s->l_mode, s->t_mode, s->mode ? "Modo 100 Hz" : "Modo 1 Hz"); }
++
++static void baro_click(lv_event_t *e) {
++    Baro *s = (Baro *)lv_event_get_user_data(e); lv_obj_t *t = lv_event_get_target(e);
++    if (lv_event_get_code(e) != EV_CLICKED) return;
++    motor_once(1, 1);
++    if (t == s->b_rec && !s->capturing) {
++        if (!s->cap) s->cap = (volatile u32 *)app_malloc(BARO_CAP * 4);
++        if (!s->cap) { set_txt(s->l_status, s->t_status, "Sem memoria"); return; }
++        s->cap_n = 0; s->nfirst = 0; s->t_start = lv_tick_get(); s->capturing = 1;
++        set_txt(s->l_status, s->t_status, "Gravando...");
++    } else if (t == s->b_mode) {
++        s->mode = !s->mode; sensor_mode(BARO_SENSOR, s->mode); baro_render_mode(s);
++    }
++}
++static void baro_tick(lv_timer_t *t) {
++    Baro *s = (Baro *)timer_user_data(t); u32 now = lv_tick_get(), h = s->head;
++    if (h - s->tail > BARO_RING) s->tail = h - BARO_RING;
++    for (; s->tail != h; s->tail++) {
++        i32 c = baro_cpa(s, s->ring8[s->tail % BARO_RING]); s->last_cpa = c;
++        if (!s->ema) s->ema = c;
++        s->ema += (c - s->ema) / 32;                             /* slow average: the weather, the altitude, the arm */
++        i32 d = c - s->ema; if (d > 30000) d = 30000; if (d < -30000) d = -30000;
++        s->hp[s->hp_i++ % BARO_NBARS] = d;
++        s->rate_n++;
++    }
++    if (now - s->rate_t >= 1000) { s->rate = s->rate_n * 1000 / (now - s->rate_t); s->rate_n = 0; s->rate_t = now; }
++    unsigned long long sq = 0; for (int i = 0; i < BARO_NBARS; i++) sq += (unsigned long long)((long long)s->hp[i] * s->hp[i]);
++    s->level = isqrt((u32)(sq >> 6));
++    char b[TXT_MAX], *p;
++    if (h) { putcpa(b, s->last_cpa, 1); set_txt(s->l_p, s->t_p, s->unit == 3 ? "formato ?" : b); }
++    else set_txt(s->l_p, s->t_p, "Aguardando...");
++    p = putn(b, s->rate, 1); p = put(p, "/s  nivel "); putcpa(p, (i32)s->level, 0); set_txt(s->l_info, s->t_info, b);
++    if (h) { u32 i = (h - 1) % BARO_RING; p = puthex(b, s->ring8[i]); p = put(p, " "); puthex(p, s->ringc[i]); set_txt(s->l_raw, s->t_raw, b); }
++    for (int i = 0; i < BARO_NBARS; i++) {                       /* the newest sample on the right; full height = 2 Pa */
++        i32 v = s->hp[(s->hp_i + i) % BARO_NBARS]; if (v < 0) v = -v;
++        i32 px = v * 60 / 200; if (px > 60) px = 60; if (px < 1) px = 1;
++        lv_obj_set_size(s->bar[i], 3, px * 2); lv_obj_set_pos(s->bar[i], i * 4, 62 - px);
++    }
++    { i32 w = (i32)s->level * 244 / 200; if (w > 244) w = 244; if (w < 2) w = 2; lv_obj_set_size(s->lvl, w, 12); }
++    if (s->capturing) {
++        if (s->cap_n >= BARO_CAP || now - s->t_start > 15000) { s->capturing = 0; baro_save(s); }
++        else { p = put(b, "Gravando "); p = putn(p, s->cap_n, 1); p = put(p, "/"); putn(p, BARO_CAP, 1); set_txt(s->l_status, s->t_status, b); }
++    }
++}
++static void *baro_create(lv_obj_t *root) {
++    Baro *s = (Baro *)app_malloc(sizeof(Baro)); if (!s) return 0;
++    fill8(s, 0, sizeof(Baro));
++    mk_text(root, 0, 6, 256, FT_SMALL, C_MUTED, ALIGN_CENTER, "Barometro");
++    s->l_p = mk_text(root, 0, 32, 256, FT_NAME, C_WHITE, ALIGN_CENTER, "");
++    s->l_info = mk_text(root, 0, 74, 256, FT_SMALL, C_WHITE, ALIGN_CENTER, "");
++    s->l_raw = mk_text(root, 0, 102, 256, FT_SMALL, C_MUTED, ALIGN_CENTER, "");
++    s->wave = mk_box(root, 2, 132, 252, 126, 8, C_CARD);
++    for (int i = 0; i < BARO_NBARS; i++) s->bar[i] = mk_box(s->wave, i * 4, 62, 3, 2, 0, C_BTN);
++    mk_box(root, 6, 266, 244, 12, 6, C_CARD); s->lvl = mk_box(root, 6, 266, 2, 12, 6, C_BTN);
++    s->b_rec = mk_pill(root, 6, 290, 118, "Gravar", 0, baro_click, s);
++    s->b_mode = mk_pill(root, 132, 290, 118, "", &s->l_mode, baro_click, s);
++    s->l_status = mk_text(root, 0, 352, 256, FT_SMALL, C_MUTED, ALIGN_CENTER, "");
++    s->mode = 1; baro_render_mode(s); s->rate_t = lv_tick_get();
++    s->magic = BARO_MAGIC;
++    sensor_listen(BARO_SENSOR, baro_cb);
++    sensor_mode(BARO_SENSOR, 1);
++    s->timer = lv_timer_create(baro_tick, 50, s);
++    return s;
++}
++static int baro_back(void *st) { (void)st; return 0; }
++static void baro_destroy(void *st) {
++    Baro *s = (Baro *)st;
++    s->capturing = 0; s->magic = 0;                              /* the callback stops using the block before it is freed */
++    sensor_mode(BARO_SENSOR, 0); sensor_unlisten(BARO_SENSOR, baro_cb);
++    if (s->timer) { lv_timer_del(s->timer); s->timer = 0; }
++    if (s->cap) app_free((void *)s->cap);
++    app_free(s);
++}
++APP_EXPORT(baro, "Barometro", &ICON_BARO, baro_create, baro_back, baro_destroy)
+diff --git a/src/watch/gen.py b/src/watch/gen.py
+index 1176613..66beab3 100644
+--- a/src/watch/gen.py
++++ b/src/watch/gen.py
+@@ -9,7 +9,7 @@ import os, sys
+ HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.join(os.path.dirname(HERE), "assets"))
+ import mkicon
+ 
+-APPS = {"tennis": "app_tennis", "counter": "app_counter", "dice": "app_dice", "mars": "app_mars"}       # name -> the App symbol in src/watch/apps/<name>.c
++APPS = {"tennis": "app_tennis", "counter": "app_counter", "dice": "app_dice", "mars": "app_mars", "baro": "app_baro", "accel": "app_accel"}       # name -> the App symbol in src/watch/apps/<name>.c
+ 
+ 
+ def icons_h():

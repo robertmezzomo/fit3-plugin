@@ -71,12 +71,11 @@ relógio e no melhor caso de amostragem, o volume do sinal acompanha a fala (0,8
 - ao sair, volta o sensor ao modo 0 e para de ouvir.
 
 ```sh
-barometro/watch/build.sh caminho/para/stock-aza3.bin R390XXU0AZA3_teclado_barometro.bin
+barometro/watch/build.sh caminho/para/stock-aza3.bin R390XXU0AZA3_teclado_sensores.bin
 ```
 
-Gera o firmware com o teclado **e** o app (SHA-256 esperado
-`4f3a37de64e75c510570af22b0ae0c865507e59f8fa5f7c6be4d47814e1b3a86`). O app substitui o Application Hub
-vazio; o Relógio Mundial continua substituído.
+Gera o firmware com o teclado e os apps **Acelerometro** e **Barometro** no Application Hub (SHA-256
+esperado `3e26b9e6ebeaac25…`, impresso pelo script). O Relógio Mundial continua substituído pelo Hub.
 
 Depois de gravar, baixe `/user/baro.bin` com o gerenciador de arquivos do Fit3-App e converta:
 
@@ -91,11 +90,35 @@ registros crus.
 |---|---|
 | Endereços e formato dos dados | leitura do firmware |
 | App: tela, taxa, nível, gravação, arquivo, desligamento (`watch/test_baro.py`, 12 verificações) | simulador, com leituras simuladas |
+| App Acelerometro: varredura de taxas, identificação dos dois chips, passo, ruído, arquivo (`watch/test_accel.py`, 14 verificações) | simulador, com um processador de sensores simulado |
 | O app num relógio real, e o que o processador de sensores realmente entrega | **ainda não testado** |
 
 Riscos próprios deste app: ele manda o barômetro para o modo de 100 Hz e, ao sair, para o modo 0.
 Se o relógio usava outro modo, ele fica assim até reiniciar. Reiniciar o relógio restaura o normal.
 A gravação faz uma escrita de ~4 KB; o fit3-toolkit relata reinícios com escritas grandes e frequentes.
+
+## O acelerômetro como microfone (condução óssea)
+
+O barômetro chega a no máximo 100 leituras por segundo (200 com patch no processador de sensores). O
+acelerômetro vai muito mais longe: o Fit3 tem um **ICM-42670** (até 1.600 leituras/s) ou um **LSM6DSO**
+(até 6.666), conforme a unidade. Com o relógio encostado no rosto ou na garganta, a vibração da voz chega
+pelo osso e pela pele.
+
+`watch/accel.c` (app **Acelerometro**) é o primeiro passo: descobrir qual chip o relógio tem e até onde
+ele vai pelo caminho do firmware.
+
+- liga o acelerômetro (sensor 0) e mostra leituras por segundo, as três palavras cruas (x, y, z),
+  o **menor passo** entre leituras e o **ruído** em repouso (eixo z), nas unidades cruas;
+- **Testar** pede 25, 50, 100, … 6400 leituras/s (`sensor_rate`, `0x2c0f04a0`), espera 1 s e conta
+  2 s em cada uma. As taxas que chegam dizem o chip: 400/800/1600 é o ICM-42670, 416/833/1666 (ou
+  qualquer coisa acima de 1.600) é o LSM6DSO;
+- no fim volta a pedir 25 leituras/s e salva a varredura, o passo, o ruído e 340 leituras cruas em
+  `/user/accel.bin`.
+
+"Calibrar para o máximo de sensibilidade" (menor faixa de medida, ±2 g, modo de baixo ruído e filtro
+mais aberto) **não é possível pelo caminho do processador principal**: essas configurações ficam no
+firmware do processador de sensores. O passo e o ruído medidos pelo app dizem qual faixa está em uso;
+com o chip identificado, dá para avaliar um patch no driver dele.
 
 ## Próximos passos possíveis
 
