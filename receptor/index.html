@@ -1,0 +1,350 @@
+<meta name="claude:viewport-fit-sides" content="cover">
+<title>Fit3 Voz</title>
+<style>
+/* Layout: coluna única, mobile-first — cartão de origem, controles, análise visual (onda + espectrograma), métricas, e uma barra de reprodução fixa embaixo. */
+:root{
+  --bg:#f4f6f7; --surface:#ffffff; --surface-2:#eef1f3; --line:#d6dde0;
+  --fg:#12191c; --muted:#5a6a70; --accent:#0e9f8e; --accent-ink:#06352f;
+  --warn:#c2410c; --ok:#0e9f8e; --grid:#c7d0d4; --trace:#0e9f8e;
+  --font-head:"Space Grotesk",system-ui,sans-serif;
+  --font-body:"Inter",system-ui,sans-serif;
+  --font-mono:ui-monospace,"JetBrains Mono",Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0b1114; --surface:#121b1f; --surface-2:#0e171b; --line:#223037;
+  --fg:#e7eef0; --muted:#8aa0a8; --accent:#2fd3bd; --accent-ink:#071a17;
+  --warn:#fb923c; --ok:#2fd3bd; --grid:#1d2a30; --trace:#2fd3bd; color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0b1114; --surface:#121b1f; --surface-2:#0e171b; --line:#223037;
+  --fg:#e7eef0; --muted:#8aa0a8; --accent:#2fd3bd; --accent-ink:#071a17;
+  --warn:#fb923c; --ok:#2fd3bd; --grid:#1d2a30; --trace:#2fd3bd; color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-body);line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:0 96px;margin:0 auto;max-width:760px}
+h1{font-family:var(--font-head);font-weight:600;font-size:1.5rem;letter-spacing:-.01em;margin:.2rem 0 0}
+h2{font-family:var(--font-head);font-weight:600;font-size:.95rem;letter-spacing:.02em;text-transform:uppercase;color:var(--muted);margin:0 0 .6rem}
+.sub{color:var(--muted);margin:.15rem 0 1.1rem;font-size:.92rem}
+header{padding-block:1.3rem .4rem}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:1rem;margin-bottom:1rem}
+.drop{border:1.5px dashed var(--line);border-radius:14px;background:var(--surface-2);padding:1.4rem 1rem;text-align:center;cursor:pointer;transition:border-color .15s,background .15s}
+.drop.hot{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-2))}
+.drop strong{color:var(--accent)}
+.drop small{display:block;color:var(--muted);margin-top:.35rem}
+input[type=file]{display:none}
+.meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.1rem .9rem}
+.meta div{padding:.35rem 0;border-bottom:1px solid var(--line)}
+.meta dt{font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.meta dd{margin:0;font-family:var(--font-mono);font-size:1rem;font-variant-numeric:tabular-nums}
+.row{display:flex;flex-wrap:wrap;gap:.9rem}
+.field{flex:1 1 150px;min-width:0}
+label{display:block;font-size:.8rem;color:var(--muted);margin-bottom:.3rem}
+select,input[type=number]{width:100%;background:var(--surface-2);color:var(--fg);border:1px solid var(--line);border-radius:9px;padding:.55rem .6rem;font-family:var(--font-mono);font-size:.95rem}
+.slider{display:flex;align-items:center;gap:.6rem}
+input[type=range]{flex:1;min-width:0;accent-color:var(--accent)}
+.slider output{font-family:var(--font-mono);font-size:.85rem;color:var(--muted);min-width:4.2em;text-align:right}
+.toggle{display:flex;align-items:center;gap:.5rem;font-size:.9rem;color:var(--fg);cursor:pointer;user-select:none}
+.toggle input{accent-color:var(--accent);width:1.1rem;height:1.1rem}
+canvas{width:100%;display:block;border-radius:10px;background:var(--surface-2);border:1px solid var(--line)}
+.canvas-label{display:flex;justify-content:space-between;font-size:.74rem;color:var(--muted);margin:.4rem .1rem 0;font-family:var(--font-mono)}
+.metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.7rem}
+.metric{background:var(--surface-2);border:1px solid var(--line);border-radius:11px;padding:.7rem .8rem}
+.metric .k{font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.metric .v{font-family:var(--font-mono);font-size:1.35rem;font-variant-numeric:tabular-nums;margin-top:.15rem}
+.metric .v small{font-size:.8rem;color:var(--muted)}
+.verdict{margin-top:.9rem;padding:.7rem .85rem;border-radius:10px;font-size:.9rem;border:1px solid var(--line);background:var(--surface-2)}
+.verdict b{color:var(--accent)}
+.bar{position:fixed;left:0;right:0;bottom:0;z-index:20;background:color-mix(in srgb,var(--surface) 92%,transparent);
+  backdrop-filter:blur(8px);border-top:1px solid var(--line);
+  padding:.7rem max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));padding-bottom:calc(.7rem + env(safe-area-inset-bottom,0px));
+  display:flex;align-items:center;gap:.8rem}
+.play{appearance:none;border:none;border-radius:11px;background:var(--accent);color:var(--accent-ink);font-family:var(--font-head);
+  font-weight:600;font-size:1rem;padding:.7rem 1.3rem;cursor:pointer;flex:0 0 auto}
+.play:disabled{opacity:.4;cursor:default}
+.bar .status{font-size:.85rem;color:var(--muted);font-family:var(--font-mono);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hint{font-size:.82rem;color:var(--muted);margin-top:.6rem}
+.warnbox{border-color:color-mix(in srgb,var(--warn) 50%,var(--line));background:color-mix(in srgb,var(--warn) 9%,var(--surface-2))}
+.warnbox b{color:var(--warn)}
+a{color:var(--accent)}
+footer{color:var(--muted);font-size:.8rem;padding-block:1.5rem 0;border-top:1px solid var(--line);margin-top:.5rem}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600&display=swap">
+
+<header>
+  <h1>Fit3 Voz</h1>
+  <p class="sub">Transforma a gravação do sensor do Galaxy Fit3 em áudio: ouça, veja o espectro e avalie se dá para entender a voz.</p>
+</header>
+
+<label class="drop" id="drop" for="file">
+  <strong>Escolher arquivo da gravação</strong>
+  <small>O <code>accel.bin</code> ou <code>baro.bin</code> que você baixou do relógio pelo Fit3 App. Toque aqui ou arraste.</small>
+  <input type="file" id="file" accept=".bin,application/octet-stream">
+</label>
+
+<main id="app" hidden>
+  <section class="card">
+    <h2>Origem</h2>
+    <dl class="meta" id="meta"></dl>
+    <div id="formatWarn"></div>
+  </section>
+
+  <section class="card">
+    <h2>Captação</h2>
+    <div class="row">
+      <div class="field" id="axisField">
+        <label for="axis">Eixo</label>
+        <select id="axis"></select>
+      </div>
+      <div class="field">
+        <label for="rate">Leituras por segundo (Hz)</label>
+        <input type="number" id="rate" min="20" max="8000" step="1">
+      </div>
+    </div>
+    <p class="hint" id="rateHint"></p>
+  </section>
+
+  <section class="card">
+    <h2>Tratamento do som</h2>
+    <div class="row" style="flex-direction:column;gap:1rem">
+      <div class="field" style="flex:1 1 100%">
+        <label for="hp">Corta grave abaixo de <span id="hpv" class="mono"></span></label>
+        <div class="slider"><input type="range" id="hp" min="0" max="300" step="5" value="80"><output id="hpo"></output></div>
+      </div>
+      <div class="field" style="flex:1 1 100%">
+        <label for="lp">Corta agudo acima de <span id="lpv" class="mono"></span></label>
+        <div class="slider"><input type="range" id="lp" min="100" max="4000" step="20" value="800"><output id="lpo"></output></div>
+      </div>
+      <div class="field" style="flex:1 1 100%">
+        <label for="pitch">Acelerar / agudizar (para entender melhor)</label>
+        <div class="slider"><input type="range" id="pitch" min="1" max="8" step="0.5" value="1"><output id="pitcho"></output></div>
+      </div>
+      <label class="toggle"><input type="checkbox" id="gate" checked> Reduzir chiado de fundo</label>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Forma de onda</h2>
+    <canvas id="wave" width="1400" height="300"></canvas>
+    <div class="canvas-label"><span id="waveT">0 s</span><span>amplitude</span></div>
+  </section>
+
+  <section class="card">
+    <h2>Espectrograma</h2>
+    <canvas id="spec" width="1400" height="360"></canvas>
+    <div class="canvas-label"><span>tempo →</span><span id="specF">0–800 Hz</span></div>
+    <p class="hint">A voz humana que se entende vive entre 300 e 3400 Hz. Se o brilho só aparecer na faixa de baixo, a gravação não guardou os agudos da fala.</p>
+  </section>
+
+  <section class="card">
+    <h2>Qualidade</h2>
+    <div class="metrics" id="metrics"></div>
+    <div class="verdict" id="verdict"></div>
+  </section>
+</main>
+
+<div class="bar" id="bar" hidden>
+  <button class="play" id="play" disabled>▶ Tocar</button>
+  <span class="status" id="status">Escolha um arquivo para começar.</span>
+</div>
+
+<footer id="foot" hidden>
+  Projeto fit3-plugin. A página só lê o arquivo no seu navegador; nada é enviado. O salvar/enviar do áudio fica para o app do celular.
+</footer>
+
+<script>
+"use strict";
+const $=s=>document.querySelector(s);
+const BARO=0x4f524142, ACC=0x31434341, F3R=0x31523346; // "BARO","ACC1","F3R1"
+const REQ_RATES=[25,50,100,200,400,800,1600,3200,6400];
+const PLAY_FS=16000;
+let data=null; // {rateDefault, channels:[{name,samples}], meta, note}
+
+// ---------- parsing ----------
+function parse(buf){
+  const dv=new DataView(buf);
+  if(buf.byteLength<8) throw new Error("Arquivo muito pequeno.");
+  const magic=dv.getUint32(0,true);
+  if(magic===ACC) return parseAcc(dv);
+  if(magic===BARO) return parseBaro(dv);
+  if(magic===F3R) return parseF3R(dv);
+  // fallback: cru int16 mono
+  const n=buf.byteLength>>1, s=new Float32Array(n);
+  for(let i=0;i<n;i++) s[i]=dv.getInt16(i*2,true)/32768;
+  return {rateDefault:1600, channels:[{name:"sinal",samples:s}], meta:{Formato:"cru int16"},
+    note:"Formato não reconhecido: lido como int16 cru. Confira as leituras por segundo."};
+}
+function parseAcc(dv){
+  const ncap=dv.getUint32(12,true);
+  const measured=[]; for(let i=0;i<9;i++) measured.push(dv.getUint32(16+i*4,true));
+  const chip=dv.getUint32(8,true);
+  const base=236, x=new Float32Array(ncap), y=new Float32Array(ncap), z=new Float32Array(ncap), m=new Float32Array(ncap);
+  for(let k=0;k<ncap;k++){
+    const xi=dv.getFloat32(base+k*12,true), yi=dv.getFloat32(base+k*12+4,true), zi=dv.getFloat32(base+k*12+8,true);
+    x[k]=xi; y[k]=yi; z[k]=zi; m[k]=Math.hypot(xi,yi,zi);
+  }
+  const best=Math.max(...measured.filter(v=>v>0&&v<8000),100);
+  return {rateDefault:best,
+    channels:[{name:"Z (face do relógio)",samples:z},{name:"X",samples:x},{name:"Y",samples:y},{name:"módulo |xyz|",samples:m}],
+    meta:{Formato:"acelerômetro", Chip:chip===1?"ICM-42670":chip===2?"LSM6DSO":"?", Amostras:ncap,
+      "Taxas medidas":measured.map((v,i)=>v?`${REQ_RATES[i]}→${v}`:null).filter(Boolean).slice(-4).join("  ")},
+    note:"O gravador atual não grava a taxa junto. Coloque em Hz a maior taxa que o teste mediu (acima)."};
+}
+function parseBaro(dv){
+  const count=dv.getUint32(8,true), t0=dv.getUint32(12,true), t1=dv.getUint32(16,true);
+  const base=216, s=new Float32Array(count);
+  for(let i=0;i<count;i++) s[i]=dv.getFloat32(base+i*4,true);
+  const fs=t1>t0?Math.round(count*1000/(t1-t0)):100;
+  return {rateDefault:fs,
+    channels:[{name:"pressão (hPa)",samples:s}],
+    meta:{Formato:"barômetro", Amostras:count, Duração:((t1-t0)/1000).toFixed(1)+" s", "Taxa medida":fs+" Hz"},
+    note:"O barômetro vai no máximo a ~100 Hz, então só capta sons graves (até ~50 Hz). Serve para referência."};
+}
+function parseF3R(dv){ // formato do gravador futuro: magic,u32 fs,u32 ch,u32 n, int16 interleaved
+  const fs=dv.getUint32(4,true), ch=dv.getUint32(8,true), n=dv.getUint32(12,true), base=16;
+  const chans=[]; for(let c=0;c<ch;c++){const s=new Float32Array(n);for(let i=0;i<n;i++)s[i]=dv.getInt16(base+(i*ch+c)*2,true)/32768;chans.push({name:"canal "+(c+1),samples:s});}
+  return {rateDefault:fs, channels:chans, meta:{Formato:"gravação F3R1", Amostras:n, Duração:(n/fs).toFixed(2)+" s", Taxa:fs+" Hz"}, note:""};
+}
+
+// ---------- DSP ----------
+function removeMean(x){let s=0;for(const v of x)s+=v;const m=s/x.length;const y=new Float32Array(x.length);for(let i=0;i<x.length;i++)y[i]=x[i]-m;return y;}
+function biquad(type,fs,f0,Q){const w=2*Math.PI*f0/fs,c=Math.cos(w),a=Math.sin(w)/(2*Q);let b0,b1,b2;
+  if(type==="hp"){b0=(1+c)/2;b1=-(1+c);b2=(1+c)/2;}else{b0=(1-c)/2;b1=1-c;b2=(1-c)/2;}
+  const a0=1+a,a1=-2*c,a2=1-a;return[b0/a0,b1/a0,b2/a0,a1/a0,a2/a0];}
+function apply(x,co){const[b0,b1,b2,a1,a2]=co;const y=new Float32Array(x.length);let x1=0,x2=0,y1=0,y2=0;
+  for(let i=0;i<x.length;i++){const xi=x[i];const yi=b0*xi+b1*x1+b2*x2-a1*y1-a2*y2;y[i]=yi;x2=x1;x1=xi;y2=y1;y1=yi;}return y;}
+function resample(x,fin,fout){const n=Math.max(1,Math.round(x.length*fout/fin)),y=new Float32Array(n),r=fin/fout;
+  for(let i=0;i<n;i++){const t=i*r,i0=Math.floor(t),f=t-i0;y[i]=(x[i0]||0)*(1-f)+(x[Math.min(i0+1,x.length-1)]||0)*f;}return y;}
+function gate(x,fs){ // atenua janelas de energia baixa (ruído estacionário)
+  const w=Math.max(16,Math.round(fs*0.03)),frames=[];for(let i=0;i<x.length;i+=w){let s=0,n=0;for(let j=i;j<Math.min(i+w,x.length);j++){s+=x[j]*x[j];n++;}frames.push(Math.sqrt(s/n));}
+  const sorted=[...frames].sort((a,b)=>a-b),floor=sorted[Math.floor(sorted.length*0.2)]||0,y=new Float32Array(x.length);
+  for(let f=0;f<frames.length;f++){const g=frames[f]<=floor*1.6?0.1:1;for(let j=f*w;j<Math.min((f+1)*w,x.length);j++)y[j]=x[j]*g;}return y;}
+function normalize(x,peak=0.95){let m=0;for(const v of x)m=Math.max(m,Math.abs(v));if(m<1e-9)return x;const y=new Float32Array(x.length);for(let i=0;i<x.length;i++)y[i]=x[i]*peak/m;return y;}
+
+function fft(re,im){const n=re.length;for(let i=1,j=0;i<n;i++){let bit=n>>1;for(;j&bit;bit>>=1)j^=bit;j^=bit;if(i<j){let t=re[i];re[i]=re[j];re[j]=t;t=im[i];im[i]=im[j];im[j]=t;}}
+  for(let len=2;len<=n;len<<=1){const ang=-2*Math.PI/len,wr=Math.cos(ang),wi=Math.sin(ang);
+    for(let i=0;i<n;i+=len){let cr=1,ci=0;for(let k=0;k<len>>1;k++){const pr=re[i+k],pi=im[i+k];const qr=re[i+k+(len>>1)]*cr-im[i+k+(len>>1)]*ci,qi=re[i+k+(len>>1)]*ci+im[i+k+(len>>1)]*cr;
+      re[i+k]=pr+qr;im[i+k]=pi+qi;re[i+k+(len>>1)]=pr-qr;im[i+k+(len>>1)]=pi-qi;const ncr=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=ncr;}}}}
+
+// ---------- pipeline ----------
+let processed=null, procFs=0, rawSel=null, rawFs=0;
+function build(){
+  const ch=data.channels[+$("#axis").value]; rawSel=removeMean(ch.samples);
+  rawFs=Math.max(20,+$("#rate").value||data.rateDefault);
+  let x=rawSel;
+  const hp=+$("#hp").value, lp=Math.min(+$("#lp").value, rawFs*0.45);
+  if(hp>0) x=apply(apply(x,biquad("hp",rawFs,hp,0.707)),biquad("hp",rawFs,hp,0.707));
+  if(lp>hp) x=apply(apply(x,biquad("lp",rawFs,lp,0.707)),biquad("lp",rawFs,lp,0.707));
+  if($("#gate").checked) x=gate(x,rawFs);
+  const speed=+$("#pitch").value;
+  processed=normalize(resample(x,rawFs,PLAY_FS/speed)); // menos amostras alvo => tocado mais rápido/agudo em PLAY_FS
+  procFs=PLAY_FS;
+  drawWave(rawSel,rawFs); drawSpec(x,rawFs); metrics(x,rawFs);
+  $("#play").disabled=false;
+  const dur=(rawSel.length/rawFs).toFixed(2);
+  $("#waveT").textContent=dur+" s";
+  $("#specF").textContent="0–"+Math.round(rawFs*0.45)+" Hz";
+}
+
+function drawWave(x,fs){const c=$("#wave"),g=c.getContext("2d"),W=c.width,H=c.height;
+  g.clearRect(0,0,W,H);const cs=getComputedStyle(document.documentElement);
+  g.strokeStyle=cs.getPropertyValue("--grid");g.lineWidth=1;g.beginPath();g.moveTo(0,H/2);g.lineTo(W,H/2);g.stroke();
+  let m=1e-9;for(const v of x)m=Math.max(m,Math.abs(v));
+  g.strokeStyle=cs.getPropertyValue("--trace");g.lineWidth=1.4;g.beginPath();
+  for(let px=0;px<W;px++){const i0=Math.floor(px/W*x.length),i1=Math.floor((px+1)/W*x.length);let lo=1e9,hi=-1e9;
+    for(let i=i0;i<=i1&&i<x.length;i++){lo=Math.min(lo,x[i]);hi=Math.max(hi,x[i]);}
+    const y1=H/2-hi/m*H*0.46,y2=H/2-lo/m*H*0.46;g.moveTo(px,y1);g.lineTo(px,y2);}
+  g.stroke();}
+
+function drawSpec(x,fs){const c=$("#spec"),g=c.getContext("2d"),W=c.width,H=c.height;
+  const N=256,hop=Math.max(1,Math.floor((x.length-N)/W));const img=g.createImageData(W,H);
+  const win=new Float32Array(N);for(let i=0;i<N;i++)win[i]=0.5-0.5*Math.cos(2*Math.PI*i/(N-1));
+  let gmax=1e-9;const col=[];
+  for(let px=0;px<W;px++){const st=px*hop;const re=new Float32Array(N),im=new Float32Array(N);
+    for(let i=0;i<N;i++)re[i]=(x[st+i]||0)*win[i];fft(re,im);
+    const mag=new Float32Array(N>>1);for(let k=0;k<N>>1;k++){mag[k]=Math.log1p(Math.hypot(re[k],im[k]));gmax=Math.max(gmax,mag[k]);}col.push(mag);}
+  for(let px=0;px<W;px++){const mag=col[px];for(let y=0;y<H;y++){const k=Math.floor((1-y/H)*(N>>1));const v=Math.min(1,mag[k]/gmax);
+    // mapa: fundo -> accent brilhante
+    const r=Math.round(10+v*40),gr=Math.round(23+v*200),b=Math.round(27+v*160);const o=(y*W+px)*4;
+    img.data[o]=r;img.data[o+1]=gr;img.data[o+2]=b;img.data[o+3]=255;}}
+  g.putImageData(img,0,0);}
+
+function bandEnergy(x,fs,lo,hi){let N=1024;while(N>x.length&&N>64)N>>=1;let e=0,tot=0,cnt=0;
+  if(x.length<N)return{band:0,tot:1};
+  const step=Math.max(N>>1,1);
+  for(let st=0;st+N<=x.length;st+=step){const re=new Float32Array(N),im=new Float32Array(N);
+    for(let i=0;i<N;i++)re[i]=x[st+i];fft(re,im);
+    for(let k=1;k<N>>1;k++){const f=k*fs/N,p=re[k]*re[k]+im[k]*im[k];tot+=p;if(f>=lo&&f<hi)e+=p;}cnt++;}
+  return cnt?{band:e,tot:tot}:{band:0,tot:1};}
+
+function metrics(x,fs){
+  let sq=0,pk=0;for(const v of x){sq+=v*v;pk=Math.max(pk,Math.abs(v));}
+  const rms=Math.sqrt(sq/x.length),crest=pk/(rms||1e-9);
+  // ruído de fundo = rms do quartil mais silencioso; sinal = quartil mais alto
+  const w=Math.max(16,Math.round(fs*0.03)),fr=[];for(let i=0;i<x.length;i+=w){let s=0,n=0;for(let j=i;j<Math.min(i+w,x.length);j++){s+=x[j]*x[j];n++;}fr.push(Math.sqrt(s/n));}
+  const sorted=[...fr].sort((a,b)=>a-b),noise=sorted[Math.floor(sorted.length*0.1)]||1e-9,sig=sorted[Math.floor(sorted.length*0.9)]||1e-9;
+  const snr=20*Math.log10(sig/noise);
+  const voice=bandEnergy(x,fs,300,Math.min(3400,fs*0.45)),low=bandEnergy(x,fs,0,300);
+  const voicePct=100*voice.band/(voice.tot||1);
+  const niquist=Math.round(fs*0.45);
+  const M=[
+    ["Banda captada","0–"+niquist,"Hz"],
+    ["Relação sinal/ruído",snr.toFixed(0),"dB"],
+    ["Energia 300–3400 Hz",voicePct.toFixed(1),"%"],
+    ["Pico/efetivo",crest.toFixed(1),"×"],
+  ];
+  $("#metrics").innerHTML=M.map(([k,v,u])=>`<div class="metric"><div class="k">${k}</div><div class="v">${v} <small>${u}</small></div></div>`).join("");
+  // veredito
+  let msg,cls="";
+  if(niquist<150){msg="A taxa é baixa demais: a banda vai só até "+niquist+" Hz, abaixo da voz. É esperado não entender fala — é o caso do barômetro ou do acelerômetro travado em ~100 Hz.";cls="warnbox";}
+  else if(voicePct<3||snr<3){msg="Quase não há energia na faixa da voz, ou o ruído domina. A gravação provavelmente não guardou fala com clareza. Tente falar com o relógio encostado na garganta.";cls="warnbox";}
+  else if(niquist<700){msg=`A banda vai até ${niquist} Hz: dá para pegar o tom grave da voz, mas as consoantes (acima de 2 kHz) ficam de fora. Som abafado, tipo telefone ruim.`;}
+  else {msg=`Banda até ${niquist} Hz com ${voicePct.toFixed(0)}% da energia na faixa da voz e ${snr.toFixed(0)} dB de sinal/ruído. É o melhor cenário deste hardware — ouça para julgar a clareza.`;}
+  $("#verdict").className="verdict"+(cls?" "+cls:"");
+  $("#verdict").innerHTML=(cls?"<b>Atenção.</b> ":"<b>Leitura.</b> ")+msg;
+}
+
+// ---------- audio ----------
+let ac=null,node=null,playing=false;
+function togglePlay(){
+  if(!processed)return;
+  if(playing){stop();return;}
+  try{ac=ac||new (window.AudioContext||window.webkitAudioContext)();}catch(e){$("#status").textContent="Áudio indisponível neste navegador.";return;}
+  if(ac.state==="suspended")ac.resume();
+  const buf=ac.createBuffer(1,processed.length,PLAY_FS);buf.copyToChannel(processed,0);
+  node=ac.createBufferSource();node.buffer=buf;node.connect(ac.destination);
+  node.onended=()=>{stop();};node.start();playing=true;$("#play").textContent="■ Parar";
+  $("#status").textContent="Tocando a ~"+Math.round(rawFs)+" Hz, acelerado "+$("#pitch").value+"×";
+}
+function stop(){if(node){try{node.stop();}catch(e){}node.disconnect();node=null;}playing=false;$("#play").textContent="▶ Tocar";}
+
+// ---------- events ----------
+function show(){["#app","#bar","#foot"].forEach(s=>$(s).hidden=false);}
+function load(file){
+  const r=new FileReader();
+  r.onload=()=>{try{
+    data=parse(r.result);stop();
+    $("#meta").innerHTML=Object.entries(data.meta).map(([k,v])=>`<div><dt>${k}</dt><dd>${v}</dd></div>`).join("");
+    const ax=$("#axis");ax.innerHTML=data.channels.map((c,i)=>`<option value="${i}">${c.name}</option>`).join("");
+    $("#axisField").style.display=data.channels.length>1?"":"none";
+    $("#rate").value=data.rateDefault;
+    $("#rateHint").textContent=data.note||"";
+    $("#formatWarn").innerHTML=data.note&&/não|máximo|cru/.test(data.note)?`<div class="verdict warnbox" style="margin-top:.8rem"><b>Nota.</b> ${data.note}</div>`:"";
+    show();build();
+    $("#status").textContent=file.name+" — "+data.channels[0].samples.length+" amostras";
+  }catch(e){$("#status").textContent="Erro ao ler: "+e.message;}};
+  r.onerror=()=>{$("#status").textContent="Não deu para abrir o arquivo.";};
+  r.readAsArrayBuffer(file);
+}
+$("#file").addEventListener("change",e=>{if(e.target.files[0])load(e.target.files[0]);});
+const drop=$("#drop");
+["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("hot");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("hot");}));
+drop.addEventListener("drop",e=>{const f=e.dataTransfer.files[0];if(f)load(f);});
+["#axis","#rate","#hp","#lp","#pitch","#gate"].forEach(s=>$(s).addEventListener("input",()=>{if(data){stop();build();}}));
+function syncOut(){$("#hpo").textContent=$("#hp").value+" Hz";$("#lpo").textContent=$("#lp").value+" Hz";$("#pitcho").textContent=(+$("#pitch").value).toFixed(1)+"×";}
+["#hp","#lp","#pitch"].forEach(s=>$(s).addEventListener("input",syncOut));syncOut();
+$("#play").addEventListener("click",togglePlay);
+</script>
