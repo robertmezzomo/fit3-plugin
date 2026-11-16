@@ -45,13 +45,20 @@ sensores, então não é prova.
   (código 8)**. O código vai para uma função da ROM do chip (veneer `0x26035ef0` → `0x06052cad`), e
   `odr/25` é guardado no byte `0x2017d5eb`. Pela tabela de ODR da TDK (5 = 1,6 kHz … 8 = 200 Hz …
   12 = 12,5 Hz) o chip estaria rodando ao dobro do valor pedido; não confirmado.
-- `0x26030c5c` lê **uma amostra dos registradores de dados** (não da FIFO), também por uma função da ROM
-  (`0x26035900`), e converte para `float`. Ou seja, o processador de sensores **consulta o chip no próprio
-  ritmo**: só aumentar o ODR do chip não aumentaria as leituras entregues.
+- `0x26030c5c` lê uma amostra dos registradores de dados, mas **só é chamada pela calibração**
+  (`icm42670_acc_gryo_get_average_data`). Não é o caminho normal. (Uma versão anterior deste arquivo
+  dizia o contrário.)
+- O caminho normal é `0x260308e8`: um tratador chamado **uma vez por amostra do chip** (recebe flags,
+  um carimbo de tempo de 16 bits em `+4` e x/y/z `int16` em `+6/+8/+10`). Ele converte para `float` e
+  acrescenta um registro de 32 bytes num lote em `0x201a2d28` (contador em `+0x648`), **com no máximo 50
+  amostras por lote**: o que passar disso antes de o lote ser enviado é descartado. O giroscópio usa
+  um lote igual em `+0x650` (contador em `+0xc90`).
 - O firmware do processador de sensores não tem CRC próprio visível: o cabeçalho (`0xbe57ec1c`, `0x40000`,
   `0`, fim `0x260ae580`) e o rodapé (`0xbe57341d`, base `0x26000000`) parecem constantes. O pacote tem o
   CRC32 do componente, que o fit3-toolkit sabe refazer. Se o carregador verifica mais alguma coisa, não
   se sabe.
 
-Para chegar a kHz seria preciso mudar **o ritmo da consulta** (ou passar a ler a FIFO) e o caminho dos
-dados até o processador principal, não só a tabela acima.
+Para chegar a kHz é preciso: (1) liberar ODRs maiores em `icm42670_setodr`; (2) descobrir de quanto em
+quanto tempo o lote de 50 é enviado, porque a 1.600 Hz ele enche em 31 ms; (3) conferir se o canal até o
+processador principal aguenta 1.600 registros de 32 bytes por segundo, ou gravar num buffer próprio e
+enviar depois.
