@@ -32,3 +32,26 @@ O app supõe que `+8` é a pressão em `float` (hPa) e mostra as duas palavras e
 
 Ou seja, com o LPS27HHTW o máximo deste caminho é **100 leituras por segundo**: só frequências até 50 Hz.
 Os outros dois modelos não foram analisados.
+
+## Acelerômetro (ICM-42670) no processador de sensores
+
+Medido num relógio real (2026-11-16, app Acelerometro): pedidos de 25/50/100 chegam como 25/50/~100;
+qualquer pedido acima de 100 chega como **~100 leituras/s**. Os 25 e 50 exatos apontam para o
+ICM-42670 (o LSM6DSO daria 26 e 52), mas o repasse pode ser cadenciado pelo próprio processador de
+sensores, então não é prova.
+
+- `icm42670_setodr(sensorid, odr)` em `0x260305e4` (referência à string `icm42670_setodr: sensorid=%d, odr=%d`):
+  `odr ≤ 12,5` → 12,5 (código 11); `≤ 25` → 25 (código 10); `< 51` → 50 (código 9); **qualquer outro → 100
+  (código 8)**. O código vai para uma função da ROM do chip (veneer `0x26035ef0` → `0x06052cad`), e
+  `odr/25` é guardado no byte `0x2017d5eb`. Pela tabela de ODR da TDK (5 = 1,6 kHz … 8 = 200 Hz …
+  12 = 12,5 Hz) o chip estaria rodando ao dobro do valor pedido; não confirmado.
+- `0x26030c5c` lê **uma amostra dos registradores de dados** (não da FIFO), também por uma função da ROM
+  (`0x26035900`), e converte para `float`. Ou seja, o processador de sensores **consulta o chip no próprio
+  ritmo**: só aumentar o ODR do chip não aumentaria as leituras entregues.
+- O firmware do processador de sensores não tem CRC próprio visível: o cabeçalho (`0xbe57ec1c`, `0x40000`,
+  `0`, fim `0x260ae580`) e o rodapé (`0xbe57341d`, base `0x26000000`) parecem constantes. O pacote tem o
+  CRC32 do componente, que o fit3-toolkit sabe refazer. Se o carregador verifica mais alguma coisa, não
+  se sabe.
+
+Para chegar a kHz seria preciso mudar **o ritmo da consulta** (ou passar a ler a FIFO) e o caminho dos
+dados até o processador principal, não só a tabela acima.
