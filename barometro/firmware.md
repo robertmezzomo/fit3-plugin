@@ -62,3 +62,19 @@ Para chegar a kHz é preciso: (1) liberar ODRs maiores em `icm42670_setodr`; (2)
 quanto tempo o lote de 50 é enviado, porque a 1.600 Hz ele enche em 31 ms; (3) conferir se o canal até o
 processador principal aguenta 1.600 registros de 32 bytes por segundo, ou gravar num buffer próprio e
 enviar depois.
+
+## Etapa 1: experimento de ODR (sensorhub/)
+
+Confirmado o caminho de uma amostra por interrupção: `hal_sensor_read_data` (`0x26014e68`) é chamada por
+um despachante de eventos (`0x26015000`, evento `0x400`); o ICM não tem timer de software próprio
+(existe `lsm6dso_timer`, não `icm42670_timer`, e há `hal_gpio_setup_irq`). Então as leituras seguem a
+taxa de interrupção do chip — subir o ODR deve subir a taxa entregue, até o limite do lote de 50.
+
+`sensorhub/patch_odr.py` muda **um byte** no firmware do processador de sensores: em `icm42670_setodr`,
+o código de ODR para qualquer taxa pedida acima de 50 passa de 8 para 5 (ICM-42670: código 5 = 1600 Hz).
+Refaz todos os CRCs do pacote. Seguro quanto à memória (não toca no lote nem em buffers) e só age ao
+ligar o sensor, nunca no boot. Mede-se o resultado com o app Acelerometro.
+
+**Dúvida que só o relógio resolve:** o código 5 pode não dar exatamente 1600 Hz (a função que escreve no
+chip está na ROM do processador, fora da imagem), e o lote de 50 pode continuar entregando ~100. O teste
+diz qual dos dois.

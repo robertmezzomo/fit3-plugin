@@ -59,6 +59,27 @@ grave sem as frequências que distinguem as vogais e consoantes. Com a boca prat
 relógio e no melhor caso de amostragem, o volume do sinal acompanha a fala (0,8). Isso serve para
 **detectar voz ou sopro**, não para transcrever.
 
+## Etapa 1 do microfone: experimento de ODR do acelerômetro
+
+`sensorhub/` gera um firmware igual ao teclado+sensores, mas com **um byte** mudado no processador de
+sensores para o acelerômetro (ICM-42670) rodar a 1600 Hz em vez de travar em ~100 leituras/s. É um
+**experimento de medição**, não o produto final: o app **Acelerometro** mostra quantas leituras
+realmente chegam depois da mudança.
+
+```sh
+sensorhub/build.sh caminho/para/stock-aza3.bin R390XXU0AZA3_accel1600.bin
+```
+
+| O quê | Verificado em |
+|---|---|
+| 1 byte no firmware de sensores, todos os CRCs do pacote refeitos, imagem principal intacta | PC |
+| Resultado no relógio (quantas leituras chegam) | **ainda não testado** |
+
+⚠️ É o **primeiro patch no firmware do processador de sensores**. Seguro quanto à memória e só age ao
+ligar o sensor (não no boot), então o relógio liga e pode ser reinstalado. Reversível reinstalando o
+firmware original. Enquanto estiver instalado, o acelerômetro roda mais rápido, o que pode bagunçar
+contagem de passos e detecção de queda — reinstale o original para voltar ao normal.
+
 ## No relógio: o app "Barometro"
 
 `watch/baro.c` é um app para o Application Hub do fit3-toolkit (veja [firmware.md](firmware.md)):
