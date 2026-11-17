@@ -30,7 +30,7 @@ git -C "$work" apply "$repo/teclado/toolkit.patch"
 git -C "$work" apply "$here/toolkit-sensores.patch"
 
 cd "$work"
-python3 -I src/build_firmware.py "$stock" "$out" --hub recorder,accel,baro --reply-keyboard --kb-lang pt
+python3 -I src/build_firmware.py "$stock" "$out" --hub diag,recorder,accel,baro --reply-keyboard --kb-lang pt
 sha256sum "$out"
 echo
 echo "Teste no simulador (opcional):"
