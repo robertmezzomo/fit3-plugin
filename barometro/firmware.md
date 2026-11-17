@@ -147,3 +147,29 @@ firmware, sem code cave, sem emulador, com risco de deixar os sensores inoperant
 O que funciona de ponta a ponta, validado com dado real: gravar no relógio (app Gravador, formato F3R1)
 → baixar pelo Fit3 App → ler e analisar na página receptora (onda, espectrograma, métricas). Só falta um
 sinal de voz, que este hardware não entrega.
+
+## Diagnóstico com registros crus (2026-11-17)
+
+O app Diag (firmware de fábrica, só leitura) gravou /user/diag.txt com os registros de 40 bytes de cada
+amostra. Layout decodificado:
+
+| bytes | conteúdo |
+|---|---|
+| 0 | id do sensor (0 = acc) |
+| 8–11 / 12–15 / 16–19 | X / Y / Z em float (m/s²) — magnitude ~9,9 = gravidade, confirma |
+| 32–35 | contador de amostra, +1 por amostra |
+| 24–27 | contador auxiliar, +20 por amostra |
+
+Resultado da varredura (firmware de fábrica): taxa entregue plana em ~100 Hz para qualquer pedido ≥100
+(50→50, 100→96, 200→101, 400→102, 800→101, 1600→101, 6400→103). **O contador de amostra é consecutivo
+mesmo no pedido de 1600 Hz** (…079, 080, 081, 082…), sem buracos.
+
+Conclusão com base nos dados: o chip roda genuinamente a ~100 Hz e **não** há um fluxo rápido sendo
+descartado — não existe nada para "resgatar" com a FIFO na configuração atual. Subir a taxa exige
+reconfigurar o ODR do chip de verdade, o que os patches tentaram e quebraram para zero, porque o firmware
+usa um mapa de registradores indireto/não padrão. Ler esses registradores exigiria comandos de teste
+(`sensor_runtest`) cujos códigos incluem operações que escrevem (calibração) e não são seguros de chutar.
+Sem esse mapa, qualquer escrita nova é chute com risco de inutilizar os sensores.
+
+Linha do acelerômetro-microfone encerrada por evidência: ~100 Hz é real, abaixo da voz, e não há caminho
+seguro para subir com a informação disponível.
