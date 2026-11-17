@@ -22,6 +22,10 @@ def main(a):
         code = int(os.environ.get("ODR_CODE", "5"))
         if raw[ODR_OFF:ODR_OFF+2] != ODR_OLD: sys.exit("setodr: bytes inesperados %s" % raw[ODR_OFF:ODR_OFF+2].hex())
         raw[ODR_OFF] = code; changes.append("ODR code=%d" % code)
+    if os.environ.get("UNSKIP", "1") == "1":
+        o = 0x260528fe - B                       # 'bls' que pula a config de filtro (reg 0x50) nas taxas altas -> NOP
+        if raw[o:o+2] != b"\x2e\xd9": sys.exit("unskip: bytes inesperados %s" % raw[o:o+2].hex())
+        raw[o:o+2] = b"\x00\xbf"; changes.append("roda config 0x50 em taxa alta")
     if os.environ.get("MODE_LN", "1") == "1":
         if raw[MODE_OFF] != 0x02: sys.exit("modo: byte inesperado em 0x260528ba: %#x (esperado 0x02)" % raw[MODE_OFF])
         raw[MODE_OFF] = 0x03; changes.append("modo baixo ruido")
